@@ -10,6 +10,7 @@ supported:
   - adc
   - netif:eth
   - uart
+  - shdc
 testing:
   ignore_tags:
     - net
