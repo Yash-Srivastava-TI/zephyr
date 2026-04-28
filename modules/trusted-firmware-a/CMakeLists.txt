@@ -34,7 +34,7 @@ if(CONFIG_BUILD_WITH_TFA)
   endif()
 
   # Build base command
-  set(TFA_BUILD_CMD_COMMON
+  set(TFA_BUILD_CMD
     make -C ${ZEPHYR_TRUSTED_FIRMWARE_A_MODULE_DIR}
       DEBUG=${TFA_BUILD_DEBUG}
       CROSS_COMPILE=${CROSS_COMPILE}
@@ -77,4 +77,43 @@ if(CONFIG_BUILD_WITH_TFA)
         ${TFA_POST_BUILD_MAKE_ARGS}
     )
   endif()
+  if(CONFIG_TFA_BUILD_FIP)
+
+    if(CONFIG_TFA_BUILD_BL33)
+      set(TFA_BL33_ARG "BL33=${CMAKE_BINARY_DIR}/zephyr/${KERNEL_BIN_NAME}")
+    else()
+      set(TFA_BL33_ARG "")
+    endif()
+
+    ExternalProject_Add(
+      tfa
+      SOURCE_DIR ${ZEPHYR_TRUSTED_FIRMWARE_A_MODULE_DIR}
+      BINARY_DIR ${TFA_BINARY_DIR}
+      CONFIGURE_COMMAND ""
+      BUILD_COMMAND ""
+      INSTALL_COMMAND ""
+      BUILD_ALWAYS True
+      USES_TERMINAL_BUILD True
+    )
+
+    set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
+      COMMAND ${TFA_BUILD_CMD}
+        ${TFA_BL33_ARG}
+        all fip
+    )
+  else()
+
+    ExternalProject_Add(
+      tfa
+      SOURCE_DIR ${ZEPHYR_TRUSTED_FIRMWARE_A_MODULE_DIR}
+      BINARY_DIR ${TFA_BINARY_DIR}
+      CONFIGURE_COMMAND ""
+      BUILD_COMMAND ${TFA_BUILD_CMD} all
+      INSTALL_COMMAND ""
+      BUILD_ALWAYS True
+      USES_TERMINAL_BUILD True
+    )
+
+  endif()
+
 endif()
