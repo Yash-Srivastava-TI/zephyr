@@ -21,6 +21,7 @@ config TFA_MAKE_BUILD_TYPE_DEBUG
 
 config TFA_BUILD_FIP
 	bool "Generate FIP (Firmware Image Package)"
+	default n
 	help
 	  Generate ARM Firmware Image Package (FIP) containing all boot stages.
 	  Platforms using FIP should enable this explicitly in their board
@@ -30,13 +31,18 @@ config TFA_USE_ZEPHYR_AS_BL33
 	bool "Use Zephyr as BL33 (Non-Secure firmware) in TF-A build"
 	depends on TFA_BUILD_FIP
 	default y
+config TFA_BUILD_BL33
+	bool "Include BL33 (Non-Secure firmware) in TF-A build"
+	default y if TFA_BUILD_FIP
+	default n
 	help
 	  Pass Zephyr binary as BL33 to TF-A build.
 
 config TFA_PLATFORM
-	string
+	string "TF-A PLAT parameter"
+	default ""
 	help
 	  Platform name for TF-A build (PLAT= parameter).
-	  Boards should set this in their Kconfig.defconfig file.
+	  Leave empty to set via board.cmake.
 
 endif # BUILD_WITH_TFA
