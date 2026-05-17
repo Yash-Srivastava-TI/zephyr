@@ -12,6 +12,7 @@ the TI AM62L platform. The board configuration provides support for:
    - ARM Generic Timer (arch_timer)
    - On-chip SRAM (oc_sram)
    - UART interfaces (uart0 to uart6)
+   - CPSW3G Ethernet Switch with two 1Gbps capable MAC Ports
 
 The board configuration also enables support for the semihosting debugging console.
 
@@ -220,6 +221,16 @@ The boot ROM loads ``tiboot3.bin``, which initializes the hardware and loads
 
 Option 2: U-Boot-Based Boot
 ============================
+
+CPSW3G (Common Platform Switch) Ethernet Switch
+-----------------------------------------------
+
+The CPSW3G Ethernet Switch integrated in the SoC has two 1 Gbps capable MAC Ports
+which are brought out on the board and interface with the DP83867 Ethernet PHY.
+CPSW3G enables Ethernet functionality on the board.
+
+SD Card
+*******
 
 Download TI's official `WIC`_ and flash the WIC file with an etching software
 onto an SD-card.
