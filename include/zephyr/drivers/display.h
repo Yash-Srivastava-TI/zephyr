@@ -358,6 +358,12 @@ struct display_buffer_descriptor {
 	uint16_t pitch;
 	/** Indicates that this is not the last write buffer of the frame */
 	bool frame_incomplete;
+	/** Buffer identifier assigned by the caller (e.g. LVGL port).
+	 *  -1 means unknown.  Drivers may use this to look up pre-cached
+	 *  physical addresses instead of calling k_mem_phys_addr() on
+	 *  every flush or inside an ISR.
+	 */
+	int buf_id;
 };
 
 /** @brief Display event payload */
