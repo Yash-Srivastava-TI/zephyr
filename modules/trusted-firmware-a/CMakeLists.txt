@@ -8,6 +8,8 @@ if(CONFIG_BUILD_WITH_TFA)
 
   include(ExternalProject)
 
+  zephyr_library_compile_options(-O3)
+
   set(tfa_image_info MAP "name: tfa, source-dir: ${ZEPHYR_TRUSTED_FIRMWARE_A_MODULE_DIR}")
   build_info(images VALUE ${tfa_image_info})
 
@@ -37,52 +39,29 @@ if(CONFIG_BUILD_WITH_TFA)
     set(TFA_TARGET_BOARD "${CONFIG_TFA_TARGET_BOARD}")
   endif()
 
+  # Allow boards/SoCs to override the cross-compile toolchain for TF-A.
+  # Priority: CMake cache (-DTFA_CROSS_COMPILE=...) > Kconfig > Zephyr CROSS_COMPILE
+  if(NOT TFA_CROSS_COMPILE)
+    if(CONFIG_TFA_CROSS_COMPILE)
+      set(TFA_CROSS_COMPILE "${CONFIG_TFA_CROSS_COMPILE}")
+    else()
+      set(TFA_CROSS_COMPILE "${CROSS_COMPILE}")
+    endif()
+  endif()
+
   # Build base command
-  set(TFA_BUILD_CMD
+  set(TFA_BUILD_CMD_COMMON
     make -C ${ZEPHYR_TRUSTED_FIRMWARE_A_MODULE_DIR}
       DEBUG=${TFA_BUILD_DEBUG}
-      CROSS_COMPILE=${CROSS_COMPILE}
+      CROSS_COMPILE=${TFA_CROSS_COMPILE}
       BUILD_BASE=${TFA_BINARY_DIR}
       PLAT=${TFA_PLAT}
       ${TFA_AARCH32_REGS}
       ${TFA_EXTRA_ARGS}
   )
 
-  set(TFA_BUILD_CMD "")
-  set(TFA_POST_BUILD_MAKE_ARGS "")
-
-  if(CONFIG_TFA_BUILD_FIP)
-    set(TFA_BUILD_CMD ${CMAKE_COMMAND} -E true)
-    if(CONFIG_TFA_USE_ZEPHYR_AS_BL33)
-      list(APPEND TFA_POST_BUILD_MAKE_ARGS
-        BL33=${CMAKE_BINARY_DIR}/zephyr/${KERNEL_BIN_NAME}
-      )
-    endif()
-
-    list(APPEND TFA_POST_BUILD_MAKE_ARGS all fip)
-  else()
-    set(TFA_BUILD_CMD ${TFA_BUILD_CMD_COMMON} all)
-  endif()
-
-  ExternalProject_Add(
-    tfa
-    SOURCE_DIR ${ZEPHYR_TRUSTED_FIRMWARE_A_MODULE_DIR}
-    BINARY_DIR ${TFA_BINARY_DIR}
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ${TFA_BUILD_CMD}
-    INSTALL_COMMAND ""
-    BUILD_ALWAYS True
-    USES_TERMINAL_BUILD True
-  )
-
-  if(NOT "${TFA_POST_BUILD_MAKE_ARGS}" STREQUAL "")
-    set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
-      COMMAND ${TFA_BUILD_CMD_COMMON}
-        ${TFA_POST_BUILD_MAKE_ARGS}
-    )
-  endif()
   if(NOT "${TFA_TARGET_BOARD}" STREQUAL "")
-    list(APPEND TFA_BUILD_CMD TARGET_BOARD=${TFA_TARGET_BOARD})
+    list(APPEND TFA_BUILD_CMD_COMMON TARGET_BOARD=${TFA_TARGET_BOARD})
   endif()
 
   if(CONFIG_TFA_BUILD_FIP)
@@ -105,7 +84,7 @@ if(CONFIG_BUILD_WITH_TFA)
     )
 
     set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
-      COMMAND ${TFA_BUILD_CMD}
+      COMMAND ${TFA_BUILD_CMD_COMMON}
         ${TFA_BL33_ARG}
         all fip
     )
@@ -116,7 +95,7 @@ if(CONFIG_BUILD_WITH_TFA)
       SOURCE_DIR ${ZEPHYR_TRUSTED_FIRMWARE_A_MODULE_DIR}
       BINARY_DIR ${TFA_BINARY_DIR}
       CONFIGURE_COMMAND ""
-      BUILD_COMMAND ${TFA_BUILD_CMD} all
+      BUILD_COMMAND ${TFA_BUILD_CMD_COMMON} all
       INSTALL_COMMAND ""
       BUILD_ALWAYS True
       USES_TERMINAL_BUILD True

@@ -20,7 +20,7 @@ if BUILD_WITH_TFA
 
 config TFA_TARGET_BOARD
 	string "TI target board for TF-A"
-	default "am62lx" if SOC_AM62L3_A53
+	default "am62lx-evm" if SOC_AM62L3_A53
 	default "lite"
 	help
 	  TF-A TARGET_BOARD parameter. Leave empty for TF-A LTS (upstream).

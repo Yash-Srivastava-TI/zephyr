@@ -27,10 +27,6 @@ config TFA_BUILD_FIP
 	  Platforms using FIP should enable this explicitly in their board
 	  defconfig.
 
-config TFA_USE_ZEPHYR_AS_BL33
-	bool "Use Zephyr as BL33 (Non-Secure firmware) in TF-A build"
-	depends on TFA_BUILD_FIP
-	default y
 config TFA_BUILD_BL33
 	bool "Include BL33 (Non-Secure firmware) in TF-A build"
 	default y if TFA_BUILD_FIP
@@ -44,5 +40,14 @@ config TFA_PLATFORM
 	help
 	  Platform name for TF-A build (PLAT= parameter).
 	  Leave empty to set via board.cmake.
+
+config TFA_CROSS_COMPILE
+	string "Cross-compile toolchain prefix for TF-A"
+	default ""
+	help
+	  Cross-compile toolchain prefix to use when building TF-A.
+	  Leave empty to use the same toolchain as Zephyr (CROSS_COMPILE),
+	  or set via CMake cache (-DTFA_CROSS_COMPILE=...) from a board or
+	  SoC CMakeLists.txt. Example: "aarch64-none-linux-gnu-"
 
 endif # BUILD_WITH_TFA

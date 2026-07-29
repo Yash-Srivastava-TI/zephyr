@@ -4,6 +4,35 @@
 
 if(CONFIG_BUILD_WITH_TFA)
 
+  # TF-A on TI K3 requires aarch64-none-linux-gnu (not aarch64-zephyr-elf).
+  # Resolve in priority order:
+  #   1. CMake cache / prior set:  -DTFA_CROSS_COMPILE=<prefix>
+  #   2. Environment variable:     export TFA_CROSS_COMPILE=<prefix>
+  #   3. Auto-detect from PATH:    aarch64-none-linux-gnu-gcc / aarch64-linux-gnu-gcc
+  if(NOT DEFINED TFA_CROSS_COMPILE)
+    if(DEFINED ENV{TFA_CROSS_COMPILE})
+      set(_tfa_cc "$ENV{TFA_CROSS_COMPILE}")
+      message(STATUS "TF-A cross-compile (from env): ${_tfa_cc}")
+    else()
+      find_program(TFA_CC NAMES aarch64-none-linux-gnu-gcc aarch64-linux-gnu-gcc)
+      if(TFA_CC)
+        string(REGEX REPLACE "gcc$" "" _tfa_cc "${TFA_CC}")
+        message(STATUS "TF-A cross-compile (auto): ${_tfa_cc}")
+      else()
+        message(WARNING
+          "TF-A on TI K3: could not find aarch64-none-linux-gnu-gcc or "
+          "aarch64-linux-gnu-gcc. TF-A will use the Zephyr SDK toolchain "
+          "which may fail to link BL1. Fix with one of:\n"
+          "  export TFA_CROSS_COMPILE=<prefix>   (before west build)\n"
+          "  west build ... -- -DTFA_CROSS_COMPILE=<prefix>")
+        set(_tfa_cc "")
+      endif()
+    endif()
+    if(_tfa_cc)
+      set(TFA_CROSS_COMPILE "${_tfa_cc}" CACHE STRING "TF-A cross-compile prefix" FORCE)
+    endif()
+  endif()
+
   if(CONFIG_TFA_MAKE_BUILD_TYPE_DEBUG)
     set(TFA_BUILD_TYPE "debug")
   else()
