@@ -132,4 +132,3 @@ properties:
     description: |
       Output data bus width in bits.  Encoded into DSS_VP_CONTROL[10:8].
       Typical values are 18 (18-bit DPI) or 24 (24-bit DPI / OLDI JEIDA-24).
-

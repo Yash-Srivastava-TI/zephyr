@@ -356,7 +356,7 @@
 		status = "disabled";
 	};
 
-	dss: dss@30200000 {
+	dss: display@30200000 {
 		compatible = "ti,tidss";
 		reg = <0x30200000 0x1000>,  /* common  */
 		      <0x30202000 0x1000>,  /* vid */
@@ -540,64 +540,7 @@
 		status = "disabled";
 	};
 
-	main_epwm0: pwm@23000000 {
-		compatible = "ti,am3352-ehrpwm";
-		reg = <0x23000000 0x100>;
-		tbclk = <&main_mmr_cfg3 0x69100 0>;
-		#pwm-cells = <3>;
-		power-domains = <&main_epwm0_pd>;
-		clocks = <&scmi_clk 164>;
-		status = "disabled";
-	};
-
-	main_epwm1: pwm@23010000 {
-		compatible = "ti,am3352-ehrpwm";
-		reg = <0x23010000 0x100>;
-		tbclk = <&main_mmr_cfg3 0x69100 1>;
-		#pwm-cells = <3>;
-		power-domains = <&main_epwm1_pd>;
-		clocks = <&scmi_clk 165>;
-		status = "disabled";
-	};
-
-	main_epwm2: pwm@23020000 {
-		compatible = "ti,am3352-ehrpwm";
-		reg = <0x23020000 0x100>;
-		tbclk = <&main_mmr_cfg3 0x69100 2>;
-		#pwm-cells = <3>;
-		power-domains = <&main_epwm2_pd>;
-		clocks = <&scmi_clk 166>;
-		status = "disabled";
-	};
-
-	main_ecap0: pwm@23100000 {
-		compatible = "ti,am3352-ecap";
-		reg = <0x23100000 0x100>;
-		#pwm-cells = <3>;
-		power-domains = <&main_ecap0_pd>;
-		clocks = <&scmi_clk 99>;
-		status = "disabled";
-	};
-
-	main_ecap1: pwm@23110000 {
-		compatible = "ti,am3352-ecap";
-		reg = <0x23110000 0x100>;
-		#pwm-cells = <3>;
-		power-domains = <&main_ecap1_pd>;
-		clocks = <&scmi_clk 100>;
-		status = "disabled";
-	};
-
-	main_ecap2: pwm@23120000 {
-		compatible = "ti,am3352-ecap";
-		reg = <0x23120000 0x100>;
-		#pwm-cells = <3>;
-		power-domains = <&main_ecap2_pd>;
-		clocks = <&scmi_clk 101>;
-		status = "disabled";
-	};
-
-	dsi0: dsi@30500000 {
+	dsi0: display@30500000 {
 		compatible = "ti,j721e-dsi";
 		reg = <0x30500000 0x100000>,  /* dsi  */
 		      <0x30270000 0x100>,     /* wrap */
@@ -612,25 +555,6 @@
 		ti,pll-ref-clk-rate-hz = <25000000>;
 		#address-cells = <1>;
 		#size-cells = <0>;
-		status = "disabled";
-	};
-
-	dss: dss@30200000 {
-		compatible = "ti,tidss";
-		reg = <0x30200000 0x1000>,  /* common  */
-		      <0x30202000 0x1000>,  /* vid */
-		      <0x30207000 0x1000>,  /* ovr */
-		      <0x3020a000 0x1000>;  /* vp */
-		reg-names = "common", "vid", "ovr", "vp";
-		/*
-		 * VP1 is index 0 — used for IRQ routing in DSS_VP_IRQENABLE/STATUS(0).
-		 * CHANNELIN = 1 → VIDL1 (lite plane) in DSS_OVR_ATTRIBUTES.
-		 */
-		ti,vp-index = <0>;
-		ti,vid-channel = <1>;
-		clocks = <&scmi_clk 161>, <&scmi_clk 162>;
-		clock-names = "vp", "fclk";
-		power-domains = <&dss_pd>;
 		status = "disabled";
 	};
 };

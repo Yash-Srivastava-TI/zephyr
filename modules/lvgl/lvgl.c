@@ -141,10 +141,10 @@ static void lvgl_allocate_rendering_buffers_static(lv_display_t *display, int di
 {
 #ifdef CONFIG_LV_Z_DOUBLE_VDB
 	lv_display_set_buffers(display, buf0_p[disp_idx], buf1_p[disp_idx], disp_buf_size[disp_idx],
-			       LV_DISPLAY_RENDER_MODE_PARTIAL);
+			       LV_DISPLAY_RENDER_MODE_DIRECT);
 #else
 	lv_display_set_buffers(display, buf0_p[disp_idx], NULL, disp_buf_size[disp_idx],
-			       LV_DISPLAY_RENDER_MODE_PARTIAL);
+			       LV_DISPLAY_RENDER_MODE_DIRECT);
 #endif /* CONFIG_LV_Z_DOUBLE_VDB */
 
 #if ALLOC_MONOCHROME_CONV_BUFFER
@@ -219,7 +219,7 @@ static int lvgl_allocate_rendering_buffers(lv_display_t *display)
 	lvgl_set_mono_conversion_buffer(vtile_buf, buf_size);
 #endif /* ALLOC_MONOCHROME_CONV_BUFFER */
 
-	lv_display_set_buffers(display, buf0, buf1, buf_size, LV_DISPLAY_RENDER_MODE_PARTIAL);
+	lv_display_set_buffers(display, buf0, buf1, buf_size, LV_DISPLAY_RENDER_MODE_DIRECT);
 	return 0;
 }
 #endif /* CONFIG_LV_Z_BUFFER_ALLOC_STATIC */
@@ -308,6 +308,16 @@ lv_result_t lv_mem_test_core(void)
 	return LV_RESULT_OK;
 }
 
+static enum display_event_result display_vsync_event(const struct device *dev, uint32_t evt,
+						     const struct display_event_data *event_data,
+						     void *user_data)
+{
+	struct lvgl_disp_data *p_disp_data = user_data;
+
+	k_sem_give(&p_disp_data->flush_complete);
+	return DISPLAY_EVENT_RESULT_CONTINUE;
+}
+
 #define ENUMERATE_DISPLAY_DEVS(n) display_dev[n] = DEVICE_DT_GET(DISPLAY_NODE(n));
 
 int lvgl_init(void)
@@ -361,6 +371,31 @@ int lvgl_init(void)
 			return -ENOTSUP;
 		}
 
+		p_disp_data->vsync_event_registered =
+			display_register_event_cb(display_dev[i], display_vsync_event, p_disp_data,
+						  DISPLAY_EVENT_VSYNC, true,
+						  &p_disp_data->vsync_event_handle) == 0;
+
+#ifdef CONFIG_LV_Z_FLUSH_THREAD
+		/* with a flush thread, we always set a flush wait callback
+		 * to avoid having LVGL spin and take CPU time waiting for the
+		 * flush to be over.
+		 * Init to 1: wait_for_flushing is called before the first flush_cb,
+		 * so there is nothing to wait for on the very first frame.
+		 */
+		k_sem_init(&p_disp_data->flush_complete, 0, 1);
+		lv_display_set_flush_wait_cb(lv_displays[i], lvgl_wait_cb);
+#else
+		/* without a flush thread, we only need to set a flush wait callback
+		 * if we successfully registered a vsync event
+		 * else we just assume that `display_write` handles it for us
+		 */
+		if (p_disp_data->vsync_event_registered) {
+			k_sem_init(&p_disp_data->flush_complete, 0, 1);
+			lv_display_set_flush_wait_cb(lv_displays[i], lvgl_wait_cb);
+		}
+#endif
+
 #ifdef CONFIG_LV_Z_BUFFER_ALLOC_STATIC
 		lvgl_allocate_rendering_buffers_static(lv_displays[i], i);
 #else
@@ -371,7 +406,7 @@ int lvgl_init(void)
 #endif
 
 #ifdef CONFIG_LV_Z_FULL_REFRESH
-		lv_display_set_render_mode(lv_displays[i], LV_DISPLAY_RENDER_MODE_FULL);
+		lv_display_set_render_mode(lv_displays[i], LV_DISPLAY_RENDER_MODE_DIRECT);
 #endif
 	}
 

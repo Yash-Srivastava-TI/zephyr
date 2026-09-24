@@ -51,4 +51,15 @@
  */
 #define LV_CONF_SUPPRESS_DEFINE_CHECK 1
 
+/*
+ * Enables lv_display_set_matrix_rotation(): draw tasks get their
+ * coordinates rotated per-task during rasterization instead of the whole
+ * screen buffer being rotated with a separate copy after rendering.
+ * LV_DRAW_TRANSFORM_USE_MATRIX depends on LV_USE_MATRIX, which depends on
+ * LV_USE_FLOAT.
+ */
+#define LV_USE_FLOAT                 1
+#define LV_USE_MATRIX                1
+#define LV_DRAW_TRANSFORM_USE_MATRIX 1
+
 #endif /* ZEPHYR_MODULES_LVGL_LV_CONF_H_ */

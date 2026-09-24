@@ -20,6 +20,7 @@
 #include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
+#include <zephyr/sys/printk.h>
 
 LOG_MODULE_REGISTER(display_tidss, CONFIG_DISPLAY_LOG_LEVEL);
 
@@ -62,7 +63,7 @@ LOG_MODULE_REGISTER(display_tidss, CONFIG_DISPLAY_LOG_LEVEL);
 #define VID_ATTR_PREMULTIPLYALPHA   BIT(28)         /* [28]   premult alpha  */
 
 /*  OVR (overlay) register offsets  (base = "ovr" region) */
-#define DSS_OVR_CONFIG       		0x0 /* layer n attributes */
+#define DSS_OVR_CONFIG			0x0 /* layer n attributes */
 #define DSS_OVR_DEFAULT_COLOR           0x08
 #define DSS_OVR_DEFAULT_COLOR2          0x0c
 #define DSS_OVR_TRANS_COLOR_MAX         0x10
@@ -105,16 +106,6 @@ LOG_MODULE_REGISTER(display_tidss, CONFIG_DISPLAY_LOG_LEVEL);
 
 /* Bytes per pixel for ARGB8888 (matches Zephyr PIXEL_FORMAT_ARGB_8888) */
 #define DSS_BPP                         4
-
-/* VSYNC timing parameters for tear-free operation */
-#define FRAME_PERIOD_MS          16   /* 60 Hz = ~16.67 ms per frame */
-#define VSYNC_SAFE_THRESHOLD_MS  2    /* Don't update if < 2ms to next VSYNC */
-
-/* TIDSS FB entry struct containing the buffer ID (-1 if unknown) */
-struct tidss_fb_entry {
-	const uint8_t *ptr;
-	int            buf_id;
-};
 
 /*  Driver configuration */
 struct tidss_config {
@@ -183,28 +174,24 @@ struct tidss_data {
 	/* Pointer to active framebuffer (currently being scanned by DSS DMA) */
 	const uint8_t *active_fb;
 
-#define TIDSS_REQ_Q_DEPTH  4   /* frames caller can submit ahead of display */
-	struct k_msgq         req_q;
-	struct tidss_fb_entry req_q_buf[TIDSS_REQ_Q_DEPTH]; /* ptr + buf_id per slot */
-	const uint8_t *cur_fb;        /* currQ: buffer in DSS VID pipe     */
-	int            cur_buf_id;    /* buf_id of cur_fb  (-1 = unknown)  */
-	bool           is_push_safe;  /* TRUE during VSYNC blanking window  */
-	struct k_spinlock lock;       /* protects is_push_safe + cur_fb     */
+#define TIDSS_QUEUE_DEPTH  4   /* frames caller can submit ahead of display */
+	struct k_msgq    req_q;
+	const uint8_t   *req_q_buf[TIDSS_QUEUE_DEPTH];
+	const uint8_t   *cur_fb;  /* currQ: buffer in DSS VID pipe     */
+	bool is_push_safe;  /* TRUE during VSYNC blanking window  */
+	bool pending_flip;
+	struct k_spinlock lock; /* protects is_push_safe + cur_fb     */
 
 	/* Row stride in bytes (hactive * DSS_BPP) */
 	uint32_t stride_bytes;
 	/* Total framebuffer size in bytes (kept for cache-flush helpers) */
 	size_t fb_bytes;
-
-	uint64_t last_vsync_time;         /* timestamp of last VSYNC interrupt */
-
 	const uint8_t *scan_fb;
-	int            scan_buf_id;   /* buf_id of scan_fb (-1 = unknown)  */
 
 	/* Event callback — single VSYNC subscriber (LVGL or application) */
 	display_event_cb_t vsync_cb;
-	void              *vsync_cb_user_data;
-	uint32_t           vsync_reg_handle; /* 0 = nothing registered */
+	void *vsync_cb_user_data;
+	uint32_t vsync_reg_handle; /* 0 = nothing registered */
 
 	enum display_pixel_format pixel_format;
 	bool blanking;
@@ -290,7 +277,7 @@ static void dss_enable_irqs(const struct device *dev)
 	uint32_t vp_irq_bit = BIT(cfg->vp_idx);
 
 	common_write(dev, DSS_VP_IRQENABLE(cfg->vp_idx),
-		     VP_IRQ_VSYNC_GO | VP_IRQ_SYNC_LOST);
+		     VP_IRQ_VSYNC | VP_IRQ_SYNC_LOST);
 	/* Unmask the selected VP in the top-level enable register */
 	common_write(dev, DSS_IRQENABLE_CLR, vp_irq_bit);
 	common_write(dev, DSS_IRQENABLE_SET, vp_irq_bit);
@@ -301,9 +288,8 @@ static void dss_vp_setup_gamma(const struct device *dev)
 {
 	uint32_t hwlen  = DSS_GAMMA_SIZE;
 	uint32_t hwbits = 8;
-	uint32_t i;
 
-	for (i = 0; i < hwlen; i++) {
+	for (uint32_t i = 0; i < hwlen; i++) {
 		uint32_t val_u16 = (65535U * i) / (hwlen - 1U);
 		uint32_t val     = val_u16 >> (16U - hwbits);
 		uint32_t entry   = (val << 16U) | (val << 8U) | val;
@@ -328,11 +314,6 @@ static void dss_plane_setup(const struct device *dev, struct tidss_data *data)
 
 	vid_fld_mod(dev, DSS_VID_ATTRIBUTES, VID_ATTR_ENABLE, 0U);
 }
-
-
-/* VSYNC timing parameters for tear-free operation */
-#define FRAME_PERIOD_MS          16   /* 60 Hz = ~16.67 ms per frame */
-#define VSYNC_SAFE_THRESHOLD_MS  2    /* Don't update if < 2ms to next VSYNC */
 
 /*  Plane FIFO thresholds and MFLAG (memory flag / QoS) configuration */
 static void dss_plane_init(const struct device *dev)
@@ -475,44 +456,50 @@ static void tidss_isr(const struct device *dev)
 		return;
 	}
 
-	/* Update the last vsync time to avoid frame tearing. */
-	data->last_vsync_time = k_uptime_get();
+	if (!(vp_stat & VP_IRQ_VSYNC)) {
+		return;
+	}
 
-	/* Function as per the callback approach. */
+	/*
+	 * At VSYNC: VFP has already passed and shadow registers were latched.
+	 * The buffer in cur_fb is now the active scan buffer.
+	 * The previously scanned buffer (old scan_fb) is now free for rendering.
+	 */
 	const uint8_t *old_scan_fb = data->scan_fb;
-	data->scan_fb     = data->cur_fb;
-	data->scan_buf_id = data->cur_buf_id;
 
-	if (data->scan_fb != NULL &&
-	    data->scan_fb != old_scan_fb &&
-	    data->vsync_cb != NULL) {
+	data->scan_fb   = data->cur_fb;
+	data->active_fb = old_scan_fb;   /* safe to render into now */
+
+	/*
+	 * Step 1: drain req_q and commit next buffer FIRST (may set GO).
+	 */
+	// k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+	/*
+	 * Step 2: read the GO bit after committing from req_q.
+	 */
+	bool go_busy = (vp_read(dev, DSS_VP_CONTROL) & VP_CTRL_GO) != 0;
+
+	/*
+	 * pending_flip is set only when dss_vp_go() is called (GO actually set).
+	 * It is cleared here when the confirmed flip fires the callback.
+	 */
+	if (!go_busy && data->pending_flip && data->vsync_cb != NULL) {
+		// printk("REaching here\n");
+		data->pending_flip = false;  /* cleared on confirmed flip — mirrors tcrtc->event=NULL */
+
 		struct display_event_data evt = {
-			.timestamp      = k_cycle_get_64(),
-			.info.buffer_id = data->scan_buf_id,
+			.timestamp = k_cycle_get_64(),
 		};
 
 		data->vsync_cb(dev, DISPLAY_EVENT_VSYNC, &evt,
-				data->vsync_cb_user_data);
+			       data->vsync_cb_user_data);
+
+		data->is_push_safe = true;
+		
 	}
 
-	data->active_fb = old_scan_fb;  /* safe to render into now */
-
-	/* Phase 2: open safe window, commit next queued buffer to shadow regs. */
-	k_spinlock_key_t key = k_spin_lock(&data->lock);
-
-	data->is_push_safe = true;
-
-	struct tidss_fb_entry next_entry;
-
-	if (k_msgq_get(&data->req_q, &next_entry, K_NO_WAIT) == 0) {
-		data->cur_fb     = next_entry.ptr;
-		data->cur_buf_id = next_entry.buf_id;
-		dss_vid_set_fb(dev, data);
-		dss_vp_go(dev);
-		data->is_push_safe = false;
-	}
-
-	k_spin_unlock(&data->lock, key);
+	// k_spin_unlock(&data->lock, key);
 }
 
 /* Write pixel data to the display. */
@@ -538,47 +525,33 @@ static int tidss_write(const struct device *dev,
 
 	LOG_DBG("W=%d, H=%d @%d,%d", desc->width, desc->height, x, y);
 
-	/* If we are too close to the next VSYNC, wait for it to pass to avoid tearing. */
-	if (data->last_vsync_time != 0) {
-		int64_t now = k_uptime_get();
-		int64_t time_since_last_vsync = now - data->last_vsync_time;
-		int64_t time_to_next_vsync = FRAME_PERIOD_MS - time_since_last_vsync;
-
-		/* If less than VSYNC_SAFE_THRESHOLD_MS to next VSYNC, wait for the VSYNC to occur. */
-		if (time_to_next_vsync < VSYNC_SAFE_THRESHOLD_MS) {
-			k_msleep(VSYNC_SAFE_THRESHOLD_MS);  // Sleep for a short duration to avoid busy waiting
-		}
+	if (IS_ENABLED(CONFIG_DCACHE)) {
+		// printk("Reaching\n");
+		sys_cache_data_flush_range((void *)buf, desc->buf_size);
 	}
 
-	/* Enqueue buf+buf_id into reqQ.*/
-	struct tidss_fb_entry entry = {
-		.ptr    = (const uint8_t *)buf,
-		.buf_id = desc->buf_id,
-	};
+	const uint8_t *fb = (const uint8_t *)buf;
 
-	if (k_msgq_put(&data->req_q, &entry, K_NO_WAIT) != 0) {
+	if (k_msgq_put(&data->req_q, &fb, K_NO_WAIT) != 0) {
+		printk("Message queue full, purging and adding new framebuffer\n");
 		k_msgq_purge(&data->req_q);
-		(void)k_msgq_put(&data->req_q, &entry, K_NO_WAIT);
+		(void)k_msgq_put(&data->req_q, &fb, K_NO_WAIT);
 	}
 
 	k_spinlock_key_t key = k_spin_lock(&data->lock);
 
 	if (data->is_push_safe) {
-		struct tidss_fb_entry next_entry;
+		const uint8_t *next_fb;
 
-		if (k_msgq_get(&data->req_q, &next_entry, K_NO_WAIT) == 0) {
-			data->cur_fb     = next_entry.ptr;
-			data->cur_buf_id = next_entry.buf_id;
+		if (k_msgq_get(&data->req_q, &next_fb, K_NO_WAIT) == 0) {
+			data->cur_fb = next_fb;
 			dss_vid_set_fb(dev, data);
 			dss_vp_go(dev);
+			data->pending_flip = true;
 			data->is_push_safe = false;
 		}
 	}
 	k_spin_unlock(&data->lock, key);
-
-	if (data->vsync_cb != NULL) {
-		return 0;
-	}
 
 	return 0;
 }
@@ -706,21 +679,17 @@ static int tidss_init(const struct device *dev)
 
 	/* Initialise the request queue */
 	k_msgq_init(&data->req_q, (char *)data->req_q_buf,
-		    sizeof(struct tidss_fb_entry), TIDSS_REQ_Q_DEPTH);
+		    sizeof(const uint8_t *), TIDSS_QUEUE_DEPTH);
 
 	data->cur_fb       = NULL;   /* shadow regs: nothing committed yet */
-	data->cur_buf_id   = -1;
 	data->scan_fb      = NULL;   /* active regs: DSS not scanning yet  */
-	data->scan_buf_id  = -1;
 	data->active_fb    = NULL;   /* freed buffer: none yet             */
+	data->pending_flip = false;  /* no flip committed yet              */
 	data->is_push_safe = false;
 
 	/* Compute framebuffer stride and total size */
 	data->stride_bytes = (uint32_t)cfg->hactive * DSS_BPP;
 	data->fb_bytes     = (size_t)data->stride_bytes * cfg->vactive;
-
-	/* Initialize last_vsync_time to 0 (no VSYNC yet) */
-	data->last_vsync_time = 0;
 
 	/* Enable functional clock */
 	if (!device_is_ready(cfg->func_clk_dev)) {
@@ -740,7 +709,8 @@ static int tidss_init(const struct device *dev)
 		return ret;
 	}
 
-	ret = clock_control_set_rate(cfg->vp_clk_dev, cfg->vp_clk_subsys, (clock_control_subsys_rate_t)(uintptr_t)(cfg->pixel_clk_hz));
+	ret = clock_control_set_rate(cfg->vp_clk_dev, cfg->vp_clk_subsys,
+		 (clock_control_subsys_rate_t)(uintptr_t)(cfg->pixel_clk_hz));
 	if (ret != 0) {
 		LOG_ERR("clock_control_set_rate(vp_clk) failed: %d", ret);
 		return ret;
@@ -774,6 +744,7 @@ static int tidss_init(const struct device *dev)
 
 	data->pixel_format = PIXEL_FORMAT_ARGB_8888;
 	data->blanking     = false;
+	data->is_push_safe = true;
 
 	LOG_INF("TIDSS ready: %ux%u @ %u Hz (%u-bit bus) [double-buffer VSYNC]",
 		cfg->hactive, cfg->vactive, cfg->pixel_clk_hz, cfg->data_width);

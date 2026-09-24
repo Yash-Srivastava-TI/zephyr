@@ -374,6 +374,7 @@ static int gt911_init(const struct device *dev)
 		 * using a level shifter).
 		 */
 		r = gt911_i2c_write_read(dev, &reg_addr, sizeof(reg_addr), &reg_id, sizeof(reg_id));
+		printk("Return value from I2C probe: %d, reg_id: 0x%08X\n", r, reg_id);
 		if (r < 0) {
 			/* Try alternate address */
 			data->actual_address = config->alt_addr;
@@ -402,7 +403,7 @@ static int gt911_init(const struct device *dev)
 		LOG_ERR("Unexpected device id: %08x ", reg_id);
 		return -ENODEV;
 	}
-
+// #if 0
 	/* need to setup the firmware first: read and write */
 	uint8_t gt911_config_firmware[GT911_REG_CONFIG_SIZE + 2] = {
 		(uint8_t)GT911_REG_CONFIG, (uint8_t)(GT911_REG_CONFIG >> 8)};
@@ -411,6 +412,7 @@ static int gt911_init(const struct device *dev)
 	r = gt911_i2c_write_read(dev, &reg_addr, sizeof(reg_addr), gt911_config_firmware + 2,
 				 GT911_REG_CONFIG_SIZE);
 	if (r < 0) {
+		printk("Failed to read GT911 config firmware: %d\n", r);
 		return r;
 	}
 	if (!gt911_verify_firmware(gt911_config_firmware + 2)) {
@@ -428,6 +430,7 @@ static int gt911_init(const struct device *dev)
 	if (r < 0) {
 		return r;
 	}
+// #endif
 
 #ifdef CONFIG_INPUT_GT911_INTERRUPT
 	r = gpio_add_callback(config->int_gpio.port, &data->int_gpio_cb);
@@ -446,6 +449,7 @@ static int gt911_init(const struct device *dev)
 	 */
 	pm_notifier_register(&data->pm_notifier_handle);
 #endif
+	LOG_INF("GT911: initialized, I2C address 0x%02X", data->actual_address);
 	return 0;
 }
 

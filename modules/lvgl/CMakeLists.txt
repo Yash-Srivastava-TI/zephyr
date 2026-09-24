@@ -12,6 +12,12 @@ set(LVGL_DIR ${ZEPHYR_LVGL_MODULE_DIR})
 zephyr_interface_library_named(LVGL)
 zephyr_library()
 
+# Match the Linux reference port (lv_port_texas_sk-am62l) which uses -O3.
+# Zephyr's global CONFIG_SPEED_OPTIMIZATIONS gives -O2; -O3 here overrides
+# for LVGL only (GCC last -O flag wins) and enables loop unrolling, deeper
+# inlining, and NEON auto-vectorization for pixel-fill/blend inner loops.
+zephyr_library_compile_options(-O3)
+
 zephyr_include_directories(${LVGL_DIR}/src/)
 zephyr_include_directories(include)
 

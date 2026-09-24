@@ -8,6 +8,7 @@
 
 #include <ti/am62l3_a53.dtsi>
 #include "am62l_evm_am62l3_a53-pinctrl.dtsi"
+#include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
 
 / {
 	model = "TI AM62L EVALUATION MODULE (EVM)";
@@ -18,6 +19,7 @@
 		zephyr,shell-uart = &main_uart0;
 		zephyr,sram = &ddr0;
 		zephyr,display = &dss;
+		zephyr,touch = &gt911;
 	};
 
 	aliases {
@@ -27,6 +29,7 @@
 		sdhc0 = &main_sdhci0;
 		sdhc1 = &main_sdhci1;
 		sdhc2 = &main_sdhci2;
+		mipi-dsi = &dsi0;
 	};
 
 	leds: leds {
@@ -115,7 +118,7 @@
 &main_gpio0_3 {
 	pinctrl-0 = <&main_gpio0_3_led>;
 	pinctrl-names = "default";
-	status = "okay";
+	status = "disabled";
 };
 
 &main_i2c0 {
@@ -131,12 +134,53 @@
 		size = <65536>;
 		timeout = <5>;
 	};
+
+	display_mcu: display_mcu@45 {
+		compatible = "raspberrypi,touchscreen-panel-regulator-v2";
+		reg = <0x45>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+
+	/*
+	 * GT911 touch controller on the display daughter card.  Per the
+	 * official Raspberry Pi Touch Display 2 overlay
+	 * (vc4-kms-dsi-ili9881-7inch-overlay.dts), reset is not a GPIO line
+	 * at all -- it is power-cycling the touch AVDD28 rail via
+	 * display_mcu pin 1 (same chip as the panel reset on pin 0), and
+	 * INT is not routed to the host, so GT911 falls back to touch
+	 * detection via I2C polling instead of interrupts.  Uses
+	 * GPIO_ACTIVE_LOW like the panel's own reset on pin 0 -- gt911_init()
+	 * asserts then deasserts the line, and must end up deasserted
+	 * (powered on) before it probes the device over I2C.
+	 *
+	 * input_gt911.c requires irq-gpios unconditionally (it also drives
+	 * the pin during the address-strap sequence), so it is pointed at
+	 * GPIO0_90 -- the board's spare "User Interrupt" pin, confirmed
+	 * unused elsewhere on this schematic -- purely as a placeholder;
+	 * nothing is physically wired to it.
+	 */
+	gt911: gt911@5d {
+		compatible = "goodix,gt911";
+		reg = <0x5d>;
+		alt-addr = <0x14>;
+		reset-gpios = <&display_mcu 1 GPIO_ACTIVE_LOW>;
+		irq-gpios = <&main_gpio0_2 26 GPIO_ACTIVE_HIGH>;
+		screen-width = <720>;
+		screen-height = <1280>;
+	};
+};
+
+&main_gpio0_2 {
+	pinctrl-0 = <&main_spi0_d0>;
+	pinctrl-names = "default";
+	status = "okay";
 };
 
 &main_i2c1 {
 	pinctrl-0 = <&main_i2c1_scl &main_i2c1_sda>;
 	pinctrl-names = "default";
-	status = "okay";
+	status = "disabled";
 
 	gpio_expander: tca6424a@22 {
 		compatible = "ti,tca6424a";
@@ -144,6 +188,7 @@
 		gpio-controller;
 		#gpio-cells = <2>;
 		ngpios = <24>;
+		status = "disabled";
 	};
 
 	sii9022a: sii9022a@3b {
@@ -153,6 +198,7 @@
 		output-format = <0>;
 		clk-falling;
 		display-controller = <&dss>;
+		status = "disabled";
 	};
 };
 
@@ -160,7 +206,7 @@
 	status = "okay";
 };
 
-&dss {
+/* &dss {
 	pinctrl-0 = <&dss_vout0_data0>,
 			<&dss_vout0_data1>,
 			<&dss_vout0_data2>,
@@ -199,20 +245,20 @@
 	display-timings {
 		compatible = "zephyr,panel-timing";
 		clock-frequency = <148500000>;
-		hfront-porch    = <88>;
-		hback-porch     = <148>;
-		hsync-len       = <44>;
-		vfront-porch    = <4>;
-		vback-porch     = <36>;
-		vsync-len       = <5>;
-		hsync-active    = <1>;
-		vsync-active    = <1>;
-		de-active       = <1>;
+		hfront-porch = <88>;
+		hback-porch = <148>;
+		hsync-len = <44>;
+		vfront-porch = <4>;
+		vback-porch = <36>;
+		vsync-len = <5>;
+		hsync-active = <1>;
+		vsync-active = <1>;
+		de-active = <1>;
 		pixelclk-active = <0>;
 	};
 
 	status = "okay";
-};
+}; */
 
 &pktdma {
 	status = "okay";
@@ -296,7 +342,7 @@
 	status = "disabled";
 };
 
-&dss {
+/* &dss {
 	pinctrl-0 = <&dss_vout0_data0>,
 		    <&dss_vout0_data1>,
 		    <&dss_vout0_data2>,
@@ -347,4 +393,41 @@
 	};
 
 	status = "okay";
+}; */
+
+&dss {
+	data-width = <24>;
+	height = <1280>;
+	width  = <720>;
+
+	display-timings {
+		compatible = "zephyr,panel-timing";
+		clock-frequency = <83330000>;
+		hfront-porch    = <239>;
+		hback-porch     = <50>;
+		hsync-len       = <33>;
+		vfront-porch    = <20>;
+		vback-porch     = <30>;
+		vsync-len       = <2>;
+		hsync-active    = <0>;
+		vsync-active    = <0>;
+		de-active       = <1>;
+		pixelclk-active = <0>;
+	};
+
+	status = "okay";
+};
+
+&dsi0 {
+	status = "okay";
+	data-lanes = <2>;
+
+	rpi_td2: panel@0 {
+		compatible = "raspberrypi,dsi-7inch";
+		reg = <0>;
+		data-lanes = <2>;
+		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
+		reset-gpios = <&display_mcu 0 GPIO_ACTIVE_LOW>;
+		status = "okay";
+	};
 };

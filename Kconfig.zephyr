@@ -538,6 +538,12 @@ config SPEED_OPTIMIZATIONS
 	  Compiler optimizations will be set to -O2 independently of other
 	  options.
 
+config FAST_OPTIMIZATIONS
+	bool "Optimize for fast"
+	help
+	  Compiler optimizations will be set to -O2 independently of other
+	  options.
+
 config DEBUG_OPTIMIZATIONS
 	bool "Optimize debugging experience"
 	help

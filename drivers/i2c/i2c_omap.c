@@ -28,8 +28,9 @@ LOG_MODULE_REGISTER(omap_i2c, CONFIG_I2C_LOG_LEVEL);
 #define RETRY                -1
 #define I2C_BITRATE_FAST     400000
 #define I2C_BITRATE_STANDARD 100000
-#define I2C_BUFSTAT_RX_MASK  GENMASK(13, 8)
-#define I2C_BUFSTAT_TX_MASK  GENMASK(5, 0)
+#define I2C_BUFSTAT_RX_MASK        GENMASK(13, 8)
+#define I2C_BUFSTAT_TX_MASK        GENMASK(5, 0)
+#define I2C_BUFSTAT_FIFODEPTH_MASK GENMASK(15, 14)
 
 /* I2C Registers */
 typedef struct {
@@ -132,6 +133,8 @@ struct i2c_omap_data {
 	struct k_sem lock;
 	bool receiver;
 	bool bb_valid;
+	uint8_t fifo_size;
+	uint8_t threshold;
 };
 
 /**
@@ -273,13 +276,12 @@ static void i2c_omap_transmit_receive_data(const struct device *dev, uint8_t num
 {
 	struct i2c_omap_data *data = DEV_DATA(dev);
 	volatile i2c_omap_regs_t *i2c_base_addr = DEV_I2C_BASE(dev);
-	uint8_t *buf_ptr = data->current_msg.buf;
 
 	while (num_bytes--) {
 		if (data->receiver) {
-			*buf_ptr++ = i2c_base_addr->DATA;
+			*data->current_msg.buf++ = i2c_base_addr->DATA;
 		} else {
-			i2c_base_addr->DATA = *(buf_ptr++);
+			i2c_base_addr->DATA = *data->current_msg.buf++;
 		}
 		data->current_msg.len--;
 	}
@@ -299,6 +301,9 @@ static void i2c_omap_resize_fifo(const struct device *dev, uint8_t size)
 {
 	struct i2c_omap_data *data = DEV_DATA(dev);
 	volatile i2c_omap_regs_t *i2c_base_addr = DEV_I2C_BASE(dev);
+
+	size = CLAMP(size, 1, data->fifo_size);
+	data->threshold = size;
 
 	if (data->receiver) {
 		i2c_base_addr->BUF &= I2C_OMAP_BUF_RXFIF_CLR;
@@ -486,6 +491,7 @@ static int i2c_omap_transfer_message_ll(const struct device *dev)
 	/* Handle receive logic */
 	if (stat & (I2C_OMAP_STAT_RRDY | I2C_OMAP_STAT_RDR)) {
 		num_bytes = FIELD_GET(I2C_BUFSTAT_RX_MASK, i2c_base_addr->BUFSTAT);
+		// printk("Num bytes: %d\n", num_bytes);
 		if (num_bytes > 0) {
 			i2c_omap_transmit_receive_data(dev, num_bytes);
 		}
@@ -496,7 +502,13 @@ static int i2c_omap_transfer_message_ll(const struct device *dev)
 
 	/* Handle transmit logic */
 	if (stat & (I2C_OMAP_STAT_XRDY | I2C_OMAP_STAT_XDR)) {
-		num_bytes = FIELD_GET(I2C_BUFSTAT_TX_MASK, i2c_base_addr->BUFSTAT);
+		/*
+		 * BUFSTAT's TX field reports how many bytes are currently
+		 * occupying the FIFO, not how much room is free, so it can't
+		 * be used to size the refill. Refill by the programmed
+		 * threshold instead, capped to what's left of the message.
+		 */
+		num_bytes = MIN(data->threshold, data->current_msg.len);
 		if (num_bytes > 0) {
 			i2c_omap_transmit_receive_data(dev, num_bytes);
 		}
@@ -553,6 +565,7 @@ static int i2c_omap_transfer_message(const struct device *dev, struct i2c_msg *m
 	data->current_msg = *msg;
 	/* Set the message length in the I2C controller */
 	i2c_base_addr->CNT = msg->len;
+	// printk("i2c_omap_transfer_message: regLen=%u len=%u flags=0x%x\n", i2c_base_addr->CNT, msg->len, msg->flags);
 	/* Clear FIFO buffers */
 	control_reg = i2c_base_addr->BUF;
 	control_reg |= I2C_OMAP_BUF_RXFIF_CLR | I2C_OMAP_BUF_TXFIF_CLR;
@@ -590,8 +603,12 @@ static int i2c_omap_transfer_message(const struct device *dev, struct i2c_msg *m
 		return 0;
 	}
 
+	LOG_ERR("i2c_omap result=0x%x len_remaining=%u timed_out=%d", result,
+		data->current_msg.len, sys_timepoint_expired(end));
+
 	/* Handle timeout or specific error conditions */
 	if (result & (I2C_OMAP_STAT_ROVR | I2C_OMAP_STAT_XUDF)) {
+		// printk("i2c_omap: Receiver overrun or transmitter underflow occurred\n");
 		i2c_omap_reset(dev);
 		i2c_omap_init_ll(dev);
 		/* Return an error code based on whether it was a timeout or buffer error */
@@ -690,6 +707,8 @@ static int i2c_omap_init(const struct device *dev)
 {
 	struct i2c_omap_data *data = DEV_DATA(dev);
 	const struct i2c_omap_cfg *cfg = DEV_CFG(dev);
+	volatile i2c_omap_regs_t *i2c_base_addr;
+	uint8_t fifo_depth_field;
 	int ret;
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
@@ -699,6 +718,15 @@ static int i2c_omap_init(const struct device *dev)
 		LOG_ERR("failed to apply pinctrl");
 		return ret;
 	}
+
+	/*
+	 * BUFSTAT[15:14] reports the physical FIFO depth as 8 << field. Use
+	 * half of that as the max FIFO trigger threshold, matching the
+	 * Linux i2c-omap driver's fifo_size calculation.
+	 */
+	i2c_base_addr = DEV_I2C_BASE(dev);
+	fifo_depth_field = FIELD_GET(I2C_BUFSTAT_FIFODEPTH_MASK, i2c_base_addr->BUFSTAT);
+	data->fifo_size = (8U << fifo_depth_field) / 2;
 
 	k_sem_init(&data->lock, 1, 1);
 	/* Set the speed for I2C */

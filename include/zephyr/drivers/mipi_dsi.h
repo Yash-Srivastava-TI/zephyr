@@ -81,6 +81,8 @@ struct mipi_dsi_timings {
 /** Transmit data in low power */
 #define MIPI_DSI_MODE_LPM		BIT(11)
 
+#define MIPI_DSI_CDNS_TI_MODE_DEFER_VIDEO BIT(12)
+
 /** @} */
 
 /** MIPI-DSI device. */
