@@ -1,0 +1,4 @@
+[submodule "samples/subsys/display/ti_smart_home/ui"]
+	path = samples/subsys/display/ti_smart_home/ui
+	url = https://github.com/lvgl-services/ti-smart-home.git
+	branch = refactor/vertical
