@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Texas Instruments Incorporated
+# SPDX-License-Identifier: Apache-2.0
+
+title: Raspberry Pi Touch Display 2 (7-inch) DSI panel
+
+description: |
+  Raspberry Pi Touch Display 2, 7-inch variant. An ILI9881C-based MIPI DSI
+  panel, driven in video mode.
+
+compatible: "raspberrypi,dsi-7inch"
+
+include: [mipi-dsi-device.yaml, display-controller.yaml]
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    description: |
+      Panel reset line (active-low), per the upstream
+      vc4-kms-dsi-ili9881-7inch-overlay.dts.
+
+  bl-gpios:
+    type: phandle-array
+    description: |
+      Optional backlight enable line, if not controlled through the
+      panel-regulator MCU instead.

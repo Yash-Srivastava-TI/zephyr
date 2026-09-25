@@ -1,0 +1,30 @@
+# Copyright (c) 2024
+# SPDX-License-Identifier: Apache-2.0
+
+config ILI9881C_DSI
+	bool "ILI9881C-based MIPI-DSI panel drivers"
+	default y
+	depends on DT_HAS_BANANAPI_LHR050H41_ENABLED || \
+		   DT_HAS_FEIXIN_K101_IM2BYL02_ENABLED || \
+		   DT_HAS_STARTEK_KD050HDFIA020_ENABLED || \
+		   DT_HAS_TDO_TL050HDV35_ENABLED || \
+		   DT_HAS_WANCHANGLONG_W552946ABA_ENABLED || \
+		   DT_HAS_AMPIRE_AM8001280G_ENABLED || \
+		   DT_HAS_RASPBERRYPI_DSI_5INCH_ENABLED || \
+		   DT_HAS_RASPBERRYPI_DSI_7INCH_ENABLED
+	select MIPI_DSI
+	help
+	  Enable the ILI9881C-family MIPI-DSI panel driver, supporting the
+	  BananaPi LHR050H41, Feixin K101-IM2BYL02, Startek KD050HDFIA020,
+	  TDO TL050HDV35, WanChangLong W552946ABA, Ampire AM8001280G, and
+	  the Raspberry Pi 5-inch/7-inch DSI touch displays.
+
+if ILI9881C_DSI
+
+config ILI9881C_DSI_INIT_PRIORITY
+	int "Initialization priority"
+	default 90
+	help
+	  ILI9881C_DSI display driver initialization priority.
+
+endif
